@@ -1,0 +1,35 @@
+## .github/workflows/test.yml
+```yaml
+name: Test Action
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Create a dummy APK for testing
+      - name: Create test APK
+        run: |
+          mkdir -p test-build
+          echo "dummy apk content" > test-build/test-app.apk
+      
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-apk
+          path: test-build/test-app.apk
+      
+      # Test the action (this would fail with dummy APK, but tests structure)
+      - name: Test DeviceLab Appium Action
+        uses: ./
+        with:
+          devicelab-url: 'https://httpbin.org/status/200'  # Mock URL for testing
+          apk-artifact-name: 'test-apk'
+        continue-on-error: true  # Expected to fail with dummy APK

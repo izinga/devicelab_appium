@@ -1,0 +1,61 @@
+name: Mobile App Testing with DeviceLab
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          
+      - name: Build Android APK
+        run: |
+          # Your Android build commands here
+          ./gradlew assembleRelease
+          
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 1
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Start DeviceLab Appium
+        id: devicelab
+        uses: your-username/devicelab_appium@v1
+        with:
+          devicelab-url: 'https://app.devicelab.dev/node/your-node-id'
+          apk-artifact-name: 'app-release-apk'
+          wait-timeout: '600'
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Python dependencies
+        run: |
+          pip install appium-python-client pytest requests
+          
+      - name: Run Appium tests
+        run: |
+          echo "Running tests against: ${{ steps.devicelab.outputs.proxy-url }}"
+          python -m pytest tests/ -v --appium-url="${{ steps.devicelab.outputs.proxy-url }}"
+          
+      - name: Cleanup DeviceLab proxy
+        if: always()
+        run: |
+          docker stop ${{ steps.devicelab.outputs.container-name }} || true
+          docker rm ${{ steps.devicelab.outputs.container-name }} || true

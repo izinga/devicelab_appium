@@ -1,0 +1,226 @@
+name: 'DeviceLab Appium'
+description: 'Start DeviceLab test node as a service container for Appium mobile testing'
+author: 'Izinga Software Private Limited'
+
+inputs:
+  devicelab-url:
+    description: 'DeviceLab script URL (required)'
+    required: true
+  
+  apk-artifact-name:
+    description: 'Name of the artifact containing the APK file (required)'
+    required: true
+  
+  apk-path:
+    description: 'Path to APK file within the artifact'
+    required: false
+    default: 'app-release.apk'
+  
+  test-node-port:
+    description: 'Port for the DeviceLab test node server'
+    required: false
+    default: '4723'
+  
+  wait-timeout:
+    description: 'Timeout in seconds to wait for test node to be ready'
+    required: false
+    default: '300'
+  
+  registry:
+    description: 'Container registry to use'
+    required: false
+    default: 'ghcr.io'
+
+outputs:
+  test-node-url:
+    description: 'URL of the running DeviceLab test node'
+    value: ${{ steps.test-node-info.outputs.url }}
+  
+  container-name:
+    description: 'Name of the test node container'
+    value: ${{ steps.test-node-info.outputs.container-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating inputs..."
+        
+        # Check devicelab-url
+        if [ -z "${{ inputs.devicelab-url }}" ]; then
+          echo "❌ ERROR: devicelab-url is required but not provided"
+          echo "Please provide a valid DeviceLab script URL in the 'devicelab-url' input"
+          exit 1
+        fi
+        echo "✅ DeviceLab URL: ${{ inputs.devicelab-url }}"
+        
+        # Check apk-artifact-name
+        if [ -z "${{ inputs.apk-artifact-name }}" ]; then
+          echo "❌ ERROR: apk-artifact-name is required but not provided"
+          echo "Please provide the name of the artifact containing your APK file in the 'apk-artifact-name' input"
+          exit 1
+        fi
+        echo "✅ APK Artifact Name: ${{ inputs.apk-artifact-name }}"
+        
+        # Test DeviceLab URL accessibility
+        echo "🌐 Testing DeviceLab URL accessibility..."
+        if ! curl -fsSL --max-time 30 "${{ inputs.devicelab-url }}" > /dev/null; then
+          echo "❌ ERROR: Cannot access DeviceLab URL: ${{ inputs.devicelab-url }}"
+          echo "Please check if the URL is correct and accessible"
+          exit 1
+        fi
+        echo "✅ DeviceLab URL is accessible"
+    
+    - name: Download APK artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.apk-artifact-name }}
+        path: ${{ github.action_path }}/apk
+      continue-on-error: true
+      id: download-apk
+    
+    - name: Validate APK download
+      shell: bash
+      run: |
+        if [ "${{ steps.download-apk.outcome }}" = "failure" ]; then
+          echo "❌ ERROR: Failed to download APK artifact '${{ inputs.apk-artifact-name }}'"
+          echo ""
+          echo "Possible causes:"
+          echo "1. Artifact name '${{ inputs.apk-artifact-name }}' does not exist"
+          echo "2. Artifact was created in a different job that hasn't completed yet"
+          echo "3. Artifact has expired or been deleted"
+          echo ""
+          echo "💡 Solutions:"
+          echo "- Check that your build job uploads an artifact with name '${{ inputs.apk-artifact-name }}'"
+          echo "- Ensure this job has 'needs: [build-job-name]' to wait for the build"
+          echo "- Verify the artifact name matches exactly (case-sensitive)"
+          exit 1
+        fi
+    
+    - name: Prepare APK for container
+      shell: bash
+      run: |
+        echo "📱 Preparing APK for container..."
+        cd ${{ github.action_path }}/apk
+        
+        # Find the APK file (handle different artifact structures)
+        apk_file=$(find . -name "*.apk" -type f | head -1)
+        if [ -z "$apk_file" ]; then
+          echo "❌ ERROR: No APK file found in artifact '${{ inputs.apk-artifact-name }}'"
+          echo ""
+          echo "Artifact contents:"
+          find . -type f -ls || echo "No files found"
+          echo ""
+          echo "💡 Solutions:"
+          echo "- Ensure your build job creates an APK file"
+          echo "- Check that the APK file is included in the artifact upload"
+          echo "- Verify the build completed successfully"
+          exit 1
+        fi
+        
+        # Copy to expected location
+        cp "$apk_file" ../app-release.apk
+        apk_size=$(stat -c%s "../app-release.apk")
+        echo "✅ Found APK: $apk_file ($(numfmt --to=iec $apk_size))"
+    
+    - name: Build DeviceLab test node image
+      shell: bash
+      run: |
+        echo "🐳 Building DeviceLab test node image..."
+        cd ${{ github.action_path }}
+        
+        # Create unique image tag
+        IMAGE_TAG="${{ inputs.registry }}/${{ github.repository_owner }}/devicelab-test-node:${{ github.sha }}"
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+        
+        # Build the image with error handling
+        if ! docker build \
+          --build-arg DEVICELAB_URL="${{ inputs.devicelab-url }}" \
+          --build-arg TEST_NODE_PORT="${{ inputs.test-node-port }}" \
+          -t "$IMAGE_TAG" \
+          . 2>&1 | tee build.log; then
+          
+          echo "❌ ERROR: Failed to build DeviceLab test node Docker image"
+          echo ""
+          echo "Build log:"
+          cat build.log
+          exit 1
+        fi
+        echo "✅ Docker image built successfully: $IMAGE_TAG"
+    
+    - name: Start DeviceLab test node container
+      shell: bash
+      run: |
+        echo "🚀 Starting DeviceLab test node container..."
+        CONTAINER_NAME="devicelab-test-node-${{ github.run_id }}"
+        echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+        
+        # Start the container with error handling
+        if ! docker run -d \
+          --name "$CONTAINER_NAME" \
+          -p ${{ inputs.test-node-port }}:${{ inputs.test-node-port }} \
+          "$IMAGE_TAG" 2>&1 | tee start.log; then
+          
+          echo "❌ ERROR: Failed to start DeviceLab test node container"
+          echo ""
+          echo "Start log:"
+          cat start.log
+          exit 1
+        fi
+        
+        echo "✅ Container started: $CONTAINER_NAME"
+        echo "📊 Container status:"
+        docker ps --filter "name=$CONTAINER_NAME"
+    
+    - name: Wait for test node to be ready
+      shell: bash
+      run: |
+        echo "⏳ Waiting for DeviceLab test node to be ready..."
+        echo "Timeout: ${{ inputs.wait-timeout }} seconds"
+        echo "Testing endpoint: http://localhost:${{ inputs.test-node-port }}/wd/hub/status"
+        
+        start_time=$(date +%s)
+        
+        timeout ${{ inputs.wait-timeout }} bash -c '
+          while true; do
+            if curl -f http://localhost:${{ inputs.test-node-port }}/wd/hub/status 2>/dev/null; then
+              echo "✅ DeviceLab test node is ready!"
+              break
+            fi
+            echo "Still waiting... ($(( $(date +%s) - '"$start_time"' ))s elapsed)"
+            sleep 5
+          done
+        ' || {
+          echo "❌ ERROR: DeviceLab test node failed to start within ${{ inputs.wait-timeout }} seconds"
+          echo ""
+          echo "🔍 Debugging information:"
+          echo "Container status:"
+          docker ps -a --filter "name=$CONTAINER_NAME"
+          echo ""
+          echo "Container logs (last 50 lines):"
+          docker logs --tail 50 "$CONTAINER_NAME" || echo "Failed to get container logs"
+          echo ""
+          echo "Port check:"
+          netstat -tlnp | grep ${{ inputs.test-node-port }} || echo "Port ${{ inputs.test-node-port }} not listening"
+          echo ""
+          echo "💡 Common solutions:"
+          echo "- Check if the DeviceLab script URL is correct"
+          echo "- Verify the APK file is valid"
+          echo "- Increase wait-timeout if the service needs more time"
+          echo "- Check container logs above for specific error messages"
+          exit 1
+        }
+    
+    - name: Set test node information
+      id: test-node-info
+      shell: bash
+      run: |
+        echo "url=http://localhost:${{ inputs.test-node-port }}" >> $GITHUB_OUTPUT
+        echo "container-name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+        echo "✅ DeviceLab test node is running at http://localhost:${{ inputs.test-node-port }}"
+
+branding:
+  icon: 'smartphone'
+  color: 'blue'
