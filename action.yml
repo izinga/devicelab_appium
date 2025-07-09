@@ -24,7 +24,7 @@ inputs:
   wait-timeout:
     description: 'Timeout in seconds to wait for test node to be ready'
     required: false
-    default: '300'
+    default: '90'
   
   registry:
     description: 'Container registry to use'
@@ -185,10 +185,22 @@ runs:
         
         timeout ${{ inputs.wait-timeout }} bash -c '
           while true; do
-            if curl -f http://localhost:${{ inputs.test-node-port }}/wd/hub/status 2>/dev/null; then
+            echo "Testing endpoint: http://localhost:${{ inputs.test-node-port }}/wd/hub/status"
+            response=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:${{ inputs.test-node-port }}/wd/hub/status 2>/dev/null)
+            http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+            response_body=$(echo "$response" | sed "s/HTTP_CODE:[0-9]*//")
+            
+            if [ -n "$http_code" ]; then
+              echo "Response: HTTP $http_code"
+              if [ -n "$response_body" ]; then
+                echo "Body: $response_body"
+              fi
               echo "✅ DeviceLab test node is ready!"
               break
+            else
+              echo "❌ Connection failed - test node not responding yet"
             fi
+            
             echo "Still waiting... ($(( $(date +%s) - '"$start_time"' ))s elapsed)"
             sleep 5
           done
@@ -220,6 +232,7 @@ runs:
         echo "url=http://localhost:${{ inputs.test-node-port }}" >> $GITHUB_OUTPUT
         echo "container-name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
         echo "✅ DeviceLab test node is running at http://localhost:${{ inputs.test-node-port }}"
+
 
 branding:
   icon: 'smartphone'

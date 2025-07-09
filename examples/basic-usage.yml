@@ -34,7 +34,7 @@ jobs:
       
       - name: Start DeviceLab Appium
         id: devicelab
-        uses: your-username/devicelab_appium@v1
+        uses: izinga/devicelab_appium@v1
         with:
           devicelab-url: 'https://app.devicelab.dev/node/your-node-id'
           apk-artifact-name: 'app-release-apk'
@@ -51,10 +51,10 @@ jobs:
           
       - name: Run Appium tests
         run: |
-          echo "Running tests against: ${{ steps.devicelab.outputs.proxy-url }}"
-          python -m pytest tests/ -v --appium-url="${{ steps.devicelab.outputs.proxy-url }}"
+          echo "Running tests against: ${{ steps.devicelab.outputs.test-node-url }}"
+          python -m pytest tests/ -v --appium-url="${{ steps.devicelab.outputs.test-node-url }}"
           
-      - name: Cleanup DeviceLab proxy
+      - name: Cleanup DeviceLab test node
         if: always()
         run: |
           docker stop ${{ steps.devicelab.outputs.container-name }} || true
