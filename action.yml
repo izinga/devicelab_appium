@@ -24,7 +24,7 @@ inputs:
   wait-timeout:
     description: 'Timeout in seconds to wait for test node to be ready'
     required: false
-    default: '90'
+    default: '150'
   
   registry:
     description: 'Container registry to use'
@@ -190,7 +190,7 @@ runs:
             http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
             response_body=$(echo "$response" | sed "s/HTTP_CODE:[0-9]*//")
             
-            if [ -n "$http_code" ]; then
+            if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
               echo "Response: HTTP $http_code"
               if [ -n "$response_body" ]; then
                 echo "Body: $response_body"
@@ -198,7 +198,7 @@ runs:
               echo "✅ DeviceLab test node is ready!"
               break
             else
-              echo "❌ Connection failed - test node not responding yet"
+              echo "❌ Connection failed - test node not responding yet (HTTP $http_code)"
             fi
             
             echo "Still waiting... ($(( $(date +%s) - '"$start_time"' ))s elapsed)"
@@ -224,6 +224,11 @@ runs:
           echo "- Check container logs above for specific error messages"
           exit 1
         }
+        
+        # Show final container logs after successful startup
+        echo ""
+        echo "📋 DeviceLab test node startup logs:"
+        docker logs --tail 500 "$CONTAINER_NAME" || echo "Failed to get container logs"
     
     - name: Set test node information
       id: test-node-info
@@ -232,7 +237,6 @@ runs:
         echo "url=http://localhost:${{ inputs.test-node-port }}" >> $GITHUB_OUTPUT
         echo "container-name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
         echo "✅ DeviceLab test node is running at http://localhost:${{ inputs.test-node-port }}"
-
 
 branding:
   icon: 'smartphone'
